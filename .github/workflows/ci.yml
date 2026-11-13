@@ -1,0 +1,26 @@
+name: API CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test .NET 10
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Restore
+        run: dotnet restore tests/Sample.Api.Tests/Sample.Api.Tests.csproj
+      - name: Build
+        run: dotnet build tests/Sample.Api.Tests/Sample.Api.Tests.csproj --configuration Release --no-restore
+      - name: Test
+        run: dotnet test tests/Sample.Api.Tests/Sample.Api.Tests.csproj --configuration Release --no-build
