@@ -1,20 +1,24 @@
-# Branching and release policy (practice)
+# Branching and Governance — project screenshot recreation
 
-## Branches
-- `main` — protected, long-lived integration branch
-- `feature/<component>/<ticket>` — temporary development branches
-- `hotfix/<component>/<ticket>` — temporary urgent fix branches
+## Long-lived branches for the API component
+- `dev/api` — PR and branch push CI, DEV deployment
+- `qa/api` — PR and branch push CI, QA deployment
+- `prod/api` — PR and branch push CI, PROD deployment
+- `main` — shared/platform integration and post-release sync
 
-Do not use separate dev/qa/prod Git branches. Environments are deployment targets with approval gates.
+## Story and promotion flow
+1. Create `story/api/JIRA-123` **from `dev/api`**; submit a PR into `dev/api`.
+2. Once approved and merged, `api.yml` runs on push, builds and tests, then calls `_deploy-component.yml` with `environment: dev`.
+3. Open a promotion PR `dev/api` -> `qa/api`, get approval, merge. QA branch rebuilds its own package, then QA deployment runs.
+4. Open a promotion PR `qa/api` -> `prod/api`, get approval, merge. PROD branch rebuilds its own package, then PROD deployment runs.
+5. Post-release, sync `prod/api` -> `main`. Review any platform changes `main` -> DEV before merging.
 
-## Pull requests
-Open a feature or hotfix PR into `main`. Require green CI, review and resolved conversations. Prefer squash merge. Confirm shared components and dependencies before merging.
+## GitHub rulesets — configure manually
+GitHub Settings > Rules > Rulesets. Target `dev/api`, `qa/api`, `prod/api` and `main`. Require PR, prevent force pushes/deletion, and require green `component-ci` or the actual check name after workflow execution. For QA and PROD add approval policies (subject to account plan and available reviewers).
 
-## Releases
-From an approved `main` commit, trigger the release workflow manually. This builds one immutable artifact per release run. DEV → QA → PROD deploy the identical artifact after required environment approvals, with smoke tests after each stage.
+GitHub Settings > Environments: create `api-dev`, `api-qa`, `api-prod` and set reviewer protection on QA/PROD where supported. Note: a solo repository owner cannot provide independent PR approval; if no eligible reviewer exists, policy may block merging.
 
-## Rollback
-Use the rollback workflow with the run ID of the last known good release. Re-deploy its retained artifact to the selected environment, confirm health, and open a post-incident review. This does not revert database migrations, SharePoint changes or external state.
+**Status:** Documentation only; rulesets and environments were not created by the connected GitHub API tools.
 
-## Ruleset status
-Rulesets must be configured and confirmed in GitHub Settings. This document alone does not activate or enforce protection; account plan may limit enforcement.
+## Important tradeoffs
+The observed workflow **rebuilds per environment** and retains artifacts 30 days. We reproduced that instead of designing an alternative. A tested immutable promotion and automated rollback mechanism are **not** evidenced by the provided YAML and are not claimed here.
