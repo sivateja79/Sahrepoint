@@ -1,0 +1,106 @@
+name: api
+
+on:
+  pull_request:
+    branches: [main, 'dev/api', 'qa/api', 'prod/api']
+  push:
+    branches: ['dev/api', 'qa/api', 'prod/api']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: api-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      relevant: ${{ steps.check.outputs.relevant }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: check
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [[ "$EVENT_NAME" != "pull_request" || "$BASE_REF" =~ ^(dev|qa|prod)/api$ ]]; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if git diff --name-only "origin/$BASE_REF...HEAD" | grep -Eq '^(src/Sample.Api/|tests/Sample.Api.Tests/|\.github/workflows/api\.yml|\.github/workflows/_deploy-component\.yml)'; then
+            echo "relevant=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "relevant=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  component-ci:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.x'
+      - name: Restore
+        run: dotnet restore tests/Sample.Api.Tests/Sample.Api.Tests.csproj
+      - name: Build
+        run: dotnet build tests/Sample.Api.Tests/Sample.Api.Tests.csproj -c Release --no-restore
+      - name: Test
+        run: dotnet test tests/Sample.Api.Tests/Sample.Api.Tests.csproj -c Release --no-build --verbosity normal
+      - name: Publish
+        if: github.event_name != 'pull_request'
+        run: dotnet publish src/Sample.Api/Sample.Api.csproj -c Release --no-build -o out/api
+      - name: Upload build artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-${{ github.sha }}
+          path: out/api
+          retention-days: 30
+          if-no-files-found: error
+
+  deploy-dev:
+    needs: component-ci
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/dev/api'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_deploy-component.yml
+    with:
+      component: api
+      environment: dev
+      kind: webapp
+      artifact: api-${{ github.sha }}
+
+  deploy-qa:
+    needs: component-ci
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/qa/api'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_deploy-component.yml
+    with:
+      component: api
+      environment: qa
+      kind: webapp
+      artifact: api-${{ github.sha }}
+
+  deploy-prod:
+    needs: component-ci
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/prod/api'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/_deploy-component.yml
+    with:
+      component: api
+      environment: prod
+      kind: webapp
+      artifact: api-${{ github.sha }}
