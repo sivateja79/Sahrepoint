@@ -34,7 +34,8 @@ jobs:
 
       - name: Azure deployment not configured
         if: vars.AZURE_CLIENT_ID == ''
-        run: echo "::notice::Azure deploy skipped: AZURE_CLIENT_ID not configured in GitHub environment."
+        run: |
+          echo "::notice::Azure deploy skipped: AZURE_CLIENT_ID not configured in GitHub environment."
 
       - name: Azure login (OIDC)
         if: vars.AZURE_CLIENT_ID != ''
