@@ -1,0 +1,137 @@
+name: API release - build once, deploy DEV QA PROD
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: sample-api-release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - run: dotnet restore tests/Sample.Api.Tests/Sample.Api.Tests.csproj
+      - run: dotnet build tests/Sample.Api.Tests/Sample.Api.Tests.csproj -c Release --no-restore
+      - run: dotnet test tests/Sample.Api.Tests/Sample.Api.Tests.csproj -c Release --no-build
+      - name: Publish release
+        run: dotnet publish src/Sample.Api/Sample.Api.csproj -c Release -o publish
+      - name: Store exact deployable artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-api
+          path: publish/
+          retention-days: 90
+          if-no-files-found: error
+
+  dev:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sample-api
+          path: publish/
+      - name: Validate target configuration
+        env:
+          CLIENT: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          APP: ${{ vars.APP_NAME }}
+        run: |
+          for v in CLIENT TENANT SUBSCRIPTION APP; do
+            test -n "${!v}" || { echo "::error::Missing $v in dev environment"; exit 1; }
+          done
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.APP_NAME }}
+          package: publish/
+      - name: Smoke test
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          test -n "$APP_URL" || { echo "::error::Missing APP_URL"; exit 1; }
+          curl --fail --retry 5 --retry-delay 5 "${APP_URL%/}/health"
+
+  qa:
+    needs: dev
+    runs-on: ubuntu-latest
+    environment: qa
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sample-api
+          path: publish/
+      - name: Validate target configuration
+        env:
+          CLIENT: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          APP: ${{ vars.APP_NAME }}
+        run: |
+          for v in CLIENT TENANT SUBSCRIPTION APP; do
+            test -n "${!v}" || { echo "::error::Missing $v in qa environment"; exit 1; }
+          done
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.APP_NAME }}
+          package: publish/
+      - name: Smoke test
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          test -n "$APP_URL" || { echo "::error::Missing APP_URL"; exit 1; }
+          curl --fail --retry 5 --retry-delay 5 "${APP_URL%/}/health"
+
+  prod:
+    needs: qa
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: sample-api
+          path: publish/
+      - name: Validate target configuration
+        env:
+          CLIENT: ${{ vars.AZURE_CLIENT_ID }}
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          APP: ${{ vars.APP_NAME }}
+        run: |
+          for v in CLIENT TENANT SUBSCRIPTION APP; do
+            test -n "${!v}" || { echo "::error::Missing $v in prod environment"; exit 1; }
+          done
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - uses: azure/webapps-deploy@v3
+        with:
+          app-name: ${{ vars.APP_NAME }}
+          package: publish/
+      - name: Smoke test
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          test -n "$APP_URL" || { echo "::error::Missing APP_URL"; exit 1; }
+          curl --fail --retry 5 --retry-delay 5 "${APP_URL%/}/health"
